@@ -4,11 +4,14 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:collection' show Queue;
 import 'package:synchronized/synchronized.dart';
+import 'package:http2/src/hpack/hpack.dart';
 import 'package:home/response.dart';
 import 'package:home/log.dart';
 import 'package:home/models.dart';
+import 'package:home/http2.dart';
 
 part 'client_base.dart';
+part 'bytebuffer.dart';
 
 Lock fileIoLock = Lock();
 
@@ -131,6 +134,7 @@ class RawServer {
   Future<void> start({SecurityContext? secContext, SetSecureOnRaw? secClientOptions}) async {
 
     var context = secContext ?? SecurityContext()
+      ..setAlpnProtocols(['h2'], true)
       ..useCertificateChain('cert.pem')
       ..usePrivateKey('priv.pem');
 
@@ -140,19 +144,24 @@ class RawServer {
 
     _server.listen((rawSocket) async {
       Log.debug(()=>'Client connected ${rawSocket.remoteAddress.address}:${rawSocket.remotePort}');
+
       RawSecureSocket? secureSocket;
       try {
-        secureSocket = secClientOptions != null ? await secClientOptions.secure() : await SetSecureOnRaw(rawSocket, context).secure();
+        secureSocket = secClientOptions != null ? await secClientOptions.secure() : await SetSecureOnRaw(rawSocket, context, supportedProtocols: ['h2']).secure();
         
+        print('ALPN selected protocol: ${secureSocket.selectedProtocol}');
         Log.debug(() => 'TLS handshake completed with ${secureSocket!.remoteAddress.address}:${secureSocket.remotePort}');
-
-      } catch (e,s) {
+      } 
+      catch (e,s) {
         rawSocket.close();
         print('TLS handshake failed: $e: $s');
         return;
       }
       Client client = Client(secureSocket);
-      client.handleSocket();
+      // client.handleSocket();
+      // preface();
+      // handleHttp2Preface(secureSocket);
+      client.handleConnection();
     });
   }
 
@@ -160,7 +169,7 @@ class RawServer {
   Future<void> parseHeaders(Client client, String fullRequest) async {
     if (fullRequest.isNotEmpty) {//.contains('\r\n\r\n')) {
         final lines = fullRequest.split('\r\n');
-        if (lines.isEmpty ) client._reject(soft:false);
+        if (lines.isEmpty ) client.reject(soft:false);
         final requestLine = lines.first;
         print('Request line: $requestLine');
 

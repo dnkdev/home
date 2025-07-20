@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:home/router.dart';
+import 'package:home/home.dart';
 
 enum Method {
   GET, POST, HEAD, DELETE, PUT, OPTIONS, OTHER;
@@ -16,6 +17,7 @@ abstract interface class IClient {
   RawSecureSocket get socket;
   Method? get method;
   String? get url;
+  bool get isClosed;
 
   add(List<int> data);
   cleanUp({bool soft});
