@@ -17,44 +17,35 @@ extension Http1Reader on ByteBufferReader {
 
   int peekByte(int offset) => _buffer[position + offset];
 
-  static Http1Request? tryParseHttp1Request(ByteBufferReader reader) {
-    final requestLine = reader.tryReadLine();
-    if (requestLine == null) return null;
+ static Http1Request? tryParseHttp1Request(ByteBufferReader reader) {
+  final requestLine = reader.tryReadLine();
+  if (requestLine == null) return null;
 
-    // print(requestLine);
-    final parts = requestLine.split(' ');
-    if (parts.length != 3) return null;
+  final parts = requestLine.split(' ');
+  if (parts.length != 3) return null;
 
-    final method = parts[0];
-    final path = parts[1];
-    final version = parts[2];
+  final method = parts[0];
+  final path = parts[1];
+  final version = parts[2];
 
-    final headers = <String, String>{};
-    while (true) {
-      final line = reader.tryReadLine();
-      if (line == null) return null;
-      if (line.isEmpty) break;
+  final headers = <String, String>{};
+  while (true) {
+    final line = reader.tryReadLine();
+    if (line == null) return null; // Incomplete header
+    if (line.isEmpty) break; // End of headers
 
-      final idx = line.indexOf(':');
-      if (idx == -1) return null;
+    final idx = line.indexOf(':');
+    if (idx == -1) return null;
 
-      final key = line.substring(0, idx).trim();
-      final value = line.substring(idx + 1).trim();
-      headers[key.toLowerCase()] = value;
-    }
+    final key = line.substring(0, idx).trim().toLowerCase();
+    final value = line.substring(idx + 1).trim();
+    headers[key] = value;
+  }
 
-    final contentLength = int.tryParse(headers['content-length'] ?? '0') ?? 0;
-    Uint8List? body;
-
-    if (contentLength > 0) {
-      final payload = reader.tryRead(contentLength);
-      if (payload == null) return null;
-      body = payload;
-    }
-
-    return Http1Request(method, path, version, headers, body);
-  } 
+  return Http1Request(method, path, version, headers);
 }
+}
+
 
 class ByteBufferReader {
   late Uint8List _buffer;
@@ -130,6 +121,23 @@ class ByteBufferReader {
     if (remaining < length) return false;
     position += length;
     return true;
+  }
+
+  /// Takes `length` bytes if available, throws if not enough
+  Uint8List take(int length) {
+    if (remaining < length) {
+      throw StateError('Not enough bytes to take: $length requested, only $remaining available');
+    }
+    final out = Uint8List.view(_buffer.buffer, _buffer.offsetInBytes + position, length);
+    position += length;
+    return out;
+  }
+
+  /// Takes all remaining unread bytes
+  Uint8List takeRemaining() {
+    final out = Uint8List.view(_buffer.buffer, _buffer.offsetInBytes + position, remaining);
+    position = _end;
+    return out;
   }
 
   void consumeFrom(BytesBuilder buffer) {

@@ -3,13 +3,9 @@ import 'package:home/home.dart';
 import 'package:home/log.dart';
 import 'package:home/response.dart';
 import 'package:home/models.dart';
-import 'package:home/router.dart';
+// import 'package:home/router.dart';
 import 'package:home/cache.dart';
 import 'package:home/utils.dart';
-
-class Server{
-  static file(String p){}
-}
 
 base class HtmlRoute extends Route{ 
   HtmlRoute({

@@ -3,7 +3,7 @@ import 'dart:io';
 enum LogLevel { none, error, warning, info, debug }
 
 class Log {
-  static LogLevel _level = LogLevel.error;
+  static LogLevel _level = LogLevel.debug;
 
   static LogLevel get level => _level;
   static set level(LogLevel value) => _level = value;

@@ -8,7 +8,8 @@ import 'package:synchronized/synchronized.dart';
 // import 'package:http2/src/hpack/hpack.dart';
 import 'package:home/log.dart';
 import 'package:home/client.dart';
-import 'package:home/client_raw.dart';
+import 'package:home/cache.dart';
+import 'package:home/utils.dart';
 
 
 Lock fileIoLock = Lock();
@@ -46,6 +47,8 @@ class ClientSecurityContext {
 }
 
 /// to pass info to every isolate, the options is decoupled from SecurityContext
+/// 
+/// [shared] multithreaded or not
 class StartOptions {
   final String certPath;
   final String keyPath;
@@ -136,41 +139,24 @@ class StartOptions {
 
 }
 
-class RawServer {
+class Server {
   final InternetAddress address;
   final int port;
   late RawServerSocket _server;
   final List<SendPort> workerPorts = [];
 
-  RawServer(this.address, this.port);
+  Server(this.address, this.port);
 
 
   Future<void> start(StartOptions? startOpt) async{
+    Log.info(()=>'Listenning on $address:$port ${startOpt != null ? (startOpt.shared ? 'shared: ${startOpt.shared} ${Platform.numberOfProcessors}' : '') :''} ${startOpt?.protocols}');
     if (startOpt?.shared == true) {
       await _startMultiThreaded(startOpt: startOpt);
     } else {
-      if(startOpt?.useTLS == true) {
-        await _startServer(startOpt!.toMap());
-        return;
-      }
-      await _startHttpServer(startOpt!.toMap());
+      await _startServer(startOpt!.toMap()); 
     }
   }
-  Future<void> _startHttpServer(Map<String, dynamic>? startOptMap) async {
-   
-    final opt = StartOptions.fromMap(startOptMap!); 
-    print(opt.shared);
-    _server = await RawServerSocket.bind(address, port, shared: opt.shared);
-    Log.info(()=>'Server listening on $address:$port');
 
-    _server.listen((rawSocket) async {
-        final client = ClientRaw(rawSocket); 
-        client.handleConnection();
-
-    });
-  }
-  /// Starts listening with the specified security contexts. ClientSecurityContext wraps `RawSecureSocket.secureServer(...)` method,
-  /// which is used to proceed TLS handshake client with server.
   Future<void> _startServer(Map<String, dynamic>? startOpt) async {
 
     final opt = StartOptions.fromMap(startOpt!);
@@ -190,44 +176,45 @@ class RawServer {
     if (context == null)  throw Exception('Security Context is Null');
 
     _server = await RawServerSocket.bind(address, port, shared: opt.shared);
-    // Log.info(()=>'Server listening on $address:$port');
 
     _server.listen((rawSocket) async {
+      final ip = rawSocket.remoteAddress.address;
+      final remotePort = rawSocket.remotePort;
       // opt.mainSendPort.send(['Hello Bro', workerPort.sendPort]);
       // Log.debug(()=>'Client conected on ${Isolate.current.hashCode}');
-      Log.debug(()=>'[${rawSocket.remoteAddress.address}:${rawSocket.remotePort}] Client connected ');
-
+      Log.debug(()=>'[$ip:$remotePort] Client connected ');
+      
       
       RawSecureSocket? secureSocket;
       try {
         // final secClientOptions = StartOptions.createClientContext(rawSocket, opt);
         // secureSocket = secClientOptions != null ? await secClientOptions.secure() : await ClientSecurityContext(rawSocket, context, supportedProtocols: ['http1.1']).secure();
-        secureSocket = await ClientSecurityContext(rawSocket, context, 
-          supportedProtocols: opt.protocols,
-          bufferedData: opt.bufferedData,
-          requestClientCertificate: opt.requestClientCert,
-          requireClientCertificate: opt.requireClientCert,
-        ).secure();
-        // secureSocket = await RawSecureSocket.secureServer(
-        //   rawSocket,
-        //   context, 
-        //   // subscription:  opt., 
-        //   bufferedData:  opt.bufferedData, 
-        //   requestClientCertificate:  opt.requestClientCert, 
-        //   requireClientCertificate:  opt.requireClientCert, 
-        //   supportedProtocols: opt.protocols
-        // );
+        // secureSocket = await ClientSecurityContext(rawSocket, context, 
+        //   supportedProtocols: opt.protocols,
+        //   bufferedData: opt.bufferedData,
+        //   requestClientCertificate: opt.requestClientCert,
+        //   requireClientCertificate: opt.requireClientCert,
+        // ).secure();
+        secureSocket = await RawSecureSocket.secureServer(
+          rawSocket,
+          context, 
+          // subscription:  opt., 
+          bufferedData:  opt.bufferedData, 
+          requestClientCertificate:  opt.requestClientCert, 
+          requireClientCertificate:  opt.requireClientCert, 
+          supportedProtocols: opt.protocols
+        );
 
 
-        Log.debug(() => 'ALPN selected protocol: ${secureSocket!.selectedProtocol}');
-        Log.debug(() => '[${secureSocket!.remoteAddress.address}:${secureSocket.remotePort}] TLS handshake completed');
+        // Log.debug(() => 'ALPN selected protocol: ${secureSocket!.selectedProtocol}');
       } 
       catch (e,s) {
-        Log.error(()=>'[${rawSocket.remoteAddress.address}:${rawSocket.remotePort}] TLS handshake failed: $e: $s');
-        rawSocket.close();
+        Log.error(()=>'[$ip:$remotePort] TLS handshake failed: $e: $s');
+        await rawSocket.close();
         return;
       }
       Client client = Client(secureSocket, rawSocket.remoteAddress.address, rawSocket.remotePort);
+      Log.debug(() => '[${client.ip}:${client.remotePort}] TLS handshake completed [ALPN: ${secureSocket != null ? secureSocket.selectedProtocol : "no"}]');
       // client.handleSocket();
       // preface();
       // handleHttp2Preface(secureSocket);
@@ -236,21 +223,13 @@ class RawServer {
   }
 
   void isolateEntry(Map<String, dynamic> rawOptions) async{
-    Log.debug(()=>'Isolate started on ${Isolate.current.hashCode}');
     Log.level = rawOptions['logLevel']; 
-    // final opt = StartOptions.fromMap(rawOptions);
-    final server = RawServer(InternetAddress.anyIPv4, 443);
-    if(rawOptions['useTLS'] == true) {
-      await _startServer(rawOptions);
-      return;
-    }else {
-      await server._startHttpServer(rawOptions); // already a Map
-    }
+    final server = Server(InternetAddress.anyIPv4, port);
+    await server._startServer(rawOptions);
   }
 
   Future<void> _startMultiThreaded({StartOptions? startOpt}) async {
     final cpuCount = Platform.numberOfProcessors;
-    Log.debug(()=> 'Starting multithreaded $cpuCount');
     for (int i = 0; i < cpuCount; i++) {
       await Isolate.spawn(isolateEntry, startOpt!.toMap());
     }
@@ -259,4 +238,62 @@ class RawServer {
   Future<void> close() async {
     await _server.close();
   }
+
+
+  static Future<String> file(String filePath, {bool normalize = true, Duration? ttl}) async {
+    return await fileIoLock.synchronized(() async {
+      final normalizedPath = normalize ? await normalizeDirPath(
+        filePath,
+        allowedDir: Directory.current.path,
+      ) : filePath;
+
+      Log.debug(()=>'file($filePath, $normalize, $ttl) looking $normalizedPath');
+
+      if (FileCache.cache[normalizedPath] != null){
+        if(FileCache.cache[normalizedPath]!.isValid) {
+          Log.debug(()=> 'Returning cached value $normalizedPath');
+          return FileCache.cache[normalizedPath]!.content!;
+        }
+        else {
+          FileCache.cache[normalizedPath]!.clear();
+        }
+      }
+     
+      Log.debug(()=> 'Caching page $normalizedPath'); 
+      final file = File(normalizedPath);
+      final content = await file.readAsString();
+      FileCache.set(normalizedPath, CacheItem(content , ttl: ttl));
+     
+      return  FileCache.get(normalizedPath)!.content!;
+    });
+  }
+  
+  static Future<List<int>> fileBin(String filePath, {bool normalize = false, Duration? ttl}) async {
+    return await fileIoLock.synchronized(() async {
+      final normalizedPath = normalize ? await normalizeDirPath(
+        filePath,
+        allowedDir: Directory.current.path,
+      ) : filePath;
+
+      Log.debug(()=>'file($filePath, $normalize, $ttl) looking $normalizedPath');
+
+      if (BinFileCache.cache[normalizedPath] != null){
+        if(BinFileCache.cache[normalizedPath]!.isValid) {
+          Log.debug(()=> 'Returning cached value $normalizedPath');
+          return BinFileCache.cache[normalizedPath]!.content!;
+        }
+        else {
+          BinFileCache.cache[normalizedPath]!.clear();
+        }
+      }
+     
+      Log.debug(()=> 'Caching page $normalizedPath'); 
+      final file = File(normalizedPath);
+      final content = await file.readAsBytes();
+      BinFileCache.set(normalizedPath, CacheItem(content , ttl: ttl));
+     
+      return  BinFileCache.get(normalizedPath)!.content!;
+    });
+  }
+
 }

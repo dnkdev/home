@@ -5,7 +5,13 @@ class Http1Request {
   final String path;
   final String version;
   final Map<String, String> headers;
-  final Uint8List? body;
+  List<int> body;
+  final Completer<void> bodyComplete = Completer<void>();
 
-  Http1Request(this.method, this.path, this.version, this.headers, this.body);
+  Http1Request(this.method, this.path, this.version, this.headers, [this.body = const []]);
+
+  int get contentLength => int.tryParse(headers['content-length'] ?? '') ?? 0;
+  bool get hasBody => contentLength > 0;
+
+  Future<void> waitForBody() => bodyComplete.future;
 }

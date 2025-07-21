@@ -45,9 +45,10 @@ class FileCache extends Cache{
 class CacheItem<T>{
   final Duration? ttl;
   int? _timestamp = DateTime.now().millisecondsSinceEpoch;
+  String? filePath;
   T? _content;
 
-  CacheItem(this._content, {this.ttl});
+  CacheItem(this._content, {this.filePath, this.ttl});
 
   T? get content {
     return _content;
