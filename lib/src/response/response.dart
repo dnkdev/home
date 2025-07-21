@@ -1,7 +1,6 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:home/models.dart';
-import 'package:home/home.dart';
+import 'package:home/client.dart';
 
 String _reasonPhrase(int code) {
   const reasons = {
@@ -412,8 +411,8 @@ class Response {
     return this;
   }
 
-  /// send Response, cleans up client
-  Future<void> send(IClient client) async {
+  /// send Response, gracefully cleans up client
+  Future<void> send(Client client) async {
     final reasonPhrase = _reasonPhrase(statusCode);
     final headerBuffer = StringBuffer();
 
@@ -428,9 +427,9 @@ class Response {
     client.add(utf8.encode(headerBuffer.toString()));
     client.add(body);
 
-    await client.cleanUp(soft:true);
+    client.cleanUp(soft:true);
   }
-  Future<void> socksend(IClient client) async {
+  Future<void> socksend(Client client) async {
     final reasonPhrase = _reasonPhrase(statusCode);
     final headerBuffer = StringBuffer();
 
@@ -445,7 +444,7 @@ class Response {
     client.add(utf8.encode(headerBuffer.toString()));
     client.add(body);
 
-    await client.cleanUp(soft:true);
+    client.cleanUp(soft:true);
   }
 
   
